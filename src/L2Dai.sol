@@ -36,6 +36,9 @@ contract L2Dai is
   /// @notice This event is emitted when the DAI is claimed
   event DAIClaimed(address indexed bridgoor, uint256 amount, uint256 total);
 
+  /// @notice This error is raised if input address(es) is zero
+  error AddressZero();
+
   /// @notice This error is raised if message from the bridge is invalid
   error MessageInvalid();
 
@@ -64,6 +67,10 @@ contract L2Dai is
     address _destAddress,
     uint32 _destId
   ) public initializer {
+    if (_bridgeAddress == address(0) && _destAddress == address(0)) {
+      revert AddressZero();
+    }
+
     __Ownable2Step_init();
     __UUPSUpgradeable_init();
     __ERC20_init("Dai Stablecoin", "DAI");
@@ -102,12 +109,14 @@ contract L2Dai is
   ) public virtual {
     if (amount < 1 ether) revert BridgeAmountInvalid();
 
+    //ensure consistency between the data points in the bridge event.
+    emit DAIBridged(msg.sender, amount, totalSupply());
+
     _burn(msg.sender, amount);
     bytes memory messageData = abi.encode(recipient, amount);
     zkEvmBridge.bridgeMessage(
       destId, destAddress, forceUpdateGlobalExitRoot, messageData
     );
-    emit DAIBridged(msg.sender, amount, totalSupply());
   }
 
   /**
@@ -127,8 +136,9 @@ contract L2Dai is
 
     (address recipient, uint256 amount) =
       abi.decode(metadata, (address, uint256));
-    _mint(recipient, amount);
 
+    //ensure consistency between the data points in the claim event.
     emit DAIClaimed(recipient, amount, totalSupply());
+    _mint(recipient, amount);
   }
 }

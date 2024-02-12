@@ -68,6 +68,9 @@ contract L1Escrow is
   /// @notice This event is emitted when assets is rebalanced
   event AssetRebalanced();
 
+  /// @notice This error is raised if input address(es) is zero
+  error AddressZero();
+
   /// @notice This error is raised if new beneficiary address is invalid
   error BeneficiaryInvalid(address newBeneficiary);
 
@@ -105,6 +108,12 @@ contract L1Escrow is
     uint256 _totalProtocolDAI,
     address _beneficiary
   ) public initializer {
+    if (
+      _daiAddress == address(0) && _sdaiAddress == address(0)
+        && _bridgeAddress == address(0) && _destAddress == address(0)
+        && _beneficiary == address(0)
+    ) revert AddressZero();
+
     __AccessControlDefaultAdminRules_init(3 days, _adminAddress);
     __UUPSUpgradeable_init();
 
@@ -161,10 +170,10 @@ contract L1Escrow is
     // sdai.maxDeposit is hardcoded to type(uint256).max.
     // sdai.deposit may reverted and it is possible that total amount of
     // locked DAI in this smart contract is greater than the totalProtocolDAI
-    dai.safeApprove(address(sdai), amount);
+    dai.safeIncreaseAllowance(address(sdai), amount);
     try sdai.deposit(amount, address(this)) returns (uint256) {}
     catch {
-      dai.safeApprove(address(sdai), 0);
+      dai.safeDecreaseAllowance(address(sdai), amount);
     }
 
     bytes memory messageData = abi.encode(recipient, amount);
@@ -186,13 +195,17 @@ contract L1Escrow is
     if (totalManagedDAI > 0) {
       uint256 excess = totalManagedDAI - totalBridgedDAI;
       if (excess > daiBalance) {
-        uint256 withdrawAmount = excess - daiBalance;
-        sdai.withdraw(withdrawAmount, address(this), address(this));
+        unchecked {
+          uint256 withdrawAmount = excess - daiBalance;
+          sdai.withdraw(withdrawAmount, address(this), address(this));
+        }
       }
       if (excess > 0.05 ether) {
-        uint256 claimedYield = excess - 0.01 ether;
-        dai.safeTransfer(beneficiary, claimedYield);
-        emit YieldClaimed(beneficiary, claimedYield);
+        unchecked {
+          uint256 claimedYield = excess - 0.01 ether;
+          dai.safeTransfer(beneficiary, claimedYield);
+          emit YieldClaimed(beneficiary, claimedYield);
+        }
       }
     }
   }
@@ -206,18 +219,22 @@ contract L1Escrow is
       uint256 targetDepositAmount = balance - totalProtocolDAI;
       if (targetDepositAmount > 0.05 ether) {
         // Leave smol amount of DAI in this smart contract
-        uint256 depositAmount = targetDepositAmount - 0.01 ether;
-        dai.safeApprove(address(sdai), depositAmount);
-        sdai.deposit(depositAmount, address(this));
+        unchecked {
+          uint256 depositAmount = targetDepositAmount - 0.01 ether;
+          dai.safeApprove(address(sdai), depositAmount);
+          sdai.deposit(depositAmount, address(this));
+        }
         emit AssetRebalanced();
       }
     } else {
       uint256 sdaiBalance = IERC20(address(sdai)).balanceOf(address(this));
       uint256 savingsBalance = sdai.previewRedeem(sdaiBalance);
-      uint256 withdrawAmount = totalProtocolDAI - balance;
-      if (withdrawAmount > 0 && savingsBalance > withdrawAmount) {
-        sdai.withdraw(withdrawAmount, address(this), address(this));
-        emit AssetRebalanced();
+      unchecked {
+        uint256 withdrawAmount = totalProtocolDAI - balance;
+        if (withdrawAmount > 0 && savingsBalance > withdrawAmount) {
+          sdai.withdraw(withdrawAmount, address(this), address(this));
+          emit AssetRebalanced();
+        }
       }
     }
   }
@@ -261,7 +278,9 @@ contract L1Escrow is
     uint256 savingsBalance = sdai.previewRedeem(sdaiBalance);
     if (amount > savingsBalance) {
       sdai.withdraw(savingsBalance, recipient, address(this));
-      dai.safeTransfer(recipient, amount - savingsBalance);
+      unchecked {
+        dai.safeTransfer(recipient, amount - savingsBalance);
+      }
     } else {
       sdai.withdraw(amount, recipient, address(this));
     }
